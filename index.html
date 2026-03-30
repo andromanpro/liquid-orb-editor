@@ -87,7 +87,6 @@
         <div class="row"><label>Max particles</label><input type="range" id="c-maxParticles" min="200" max="10000" value="5000"><span id="v-maxParticles">5000</span></div>
         <label><input type="checkbox" id="c-autoAdapt"> Auto-adapt</label>
         <label><input type="checkbox" id="c-objectPooling"> Object pooling</label>
-        <label><input type="checkbox" id="c-useSprites" checked> Gradient sprites (fast)</label>
       </div>
     </div>
 
@@ -147,7 +146,7 @@
       showFill:0, embers:1, bubbles:1, surfaceGlow:1, glass:1,
       collisionMode:'merge',
       airDrag:.998, bounce:.55,
-      maxParticles:5000, autoAdapt:0, objectPooling:0, useSprites:1
+      maxParticles:5000, autoAdapt:0, objectPooling:0
     };
     var orbRadius = cfg.orbSize / 2;
 
@@ -167,56 +166,6 @@
     };
 
     // ========= FX PARTICLE ARRAYS =========
-    // ========= GRADIENT SPRITES =========
-    var SPRITE_SIZE = 128;
-    var FIRE_SPRITE_COUNT = 10;
-    var fireSprites = [];
-    var smokeSprite = null;
-    var fireballSprite = null;
-
-    function generateSprites() {
-      fireSprites = [];
-      for (var si = 0; si < FIRE_SPRITE_COUNT; si++) {
-        var t = si / (FIRE_SPRITE_COUNT - 1);
-        var inv = 1 - t;
-        var r = Math.min(255, 260 - t * 180);
-        var g = Math.min(255, 180 * inv * inv);
-        var b = Math.min(255, 80 * inv * inv * inv);
-        var cvs = document.createElement('canvas');
-        cvs.width = cvs.height = SPRITE_SIZE;
-        var sctx = cvs.getContext('2d');
-        var grad = sctx.createRadialGradient(SPRITE_SIZE/2, SPRITE_SIZE/2, 0, SPRITE_SIZE/2, SPRITE_SIZE/2, SPRITE_SIZE/2);
-        grad.addColorStop(0, 'rgba(' + ~~r + ',' + ~~g + ',' + ~~b + ',1)');
-        grad.addColorStop(0.4, 'rgba(' + ~~(r*0.8) + ',' + ~~(g*0.6) + ',0,0.6)');
-        grad.addColorStop(1, 'rgba(' + ~~(r*0.4) + ',0,0,0)');
-        sctx.fillStyle = grad;
-        sctx.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
-        fireSprites.push(cvs);
-      }
-      // Smoke sprite
-      smokeSprite = document.createElement('canvas');
-      smokeSprite.width = smokeSprite.height = SPRITE_SIZE;
-      var smctx = smokeSprite.getContext('2d');
-      var smGrad = smctx.createRadialGradient(SPRITE_SIZE/2, SPRITE_SIZE/2, 0, SPRITE_SIZE/2, SPRITE_SIZE/2, SPRITE_SIZE/2);
-      smGrad.addColorStop(0, 'rgba(80,80,85,1)');
-      smGrad.addColorStop(0.6, 'rgba(80,80,85,0.4)');
-      smGrad.addColorStop(1, 'rgba(60,60,65,0)');
-      smctx.fillStyle = smGrad;
-      smctx.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
-      // Fireball sprite (white-yellow-orange)
-      fireballSprite = document.createElement('canvas');
-      fireballSprite.width = fireballSprite.height = SPRITE_SIZE;
-      var fbctx = fireballSprite.getContext('2d');
-      var fbGrad = fbctx.createRadialGradient(SPRITE_SIZE/2, SPRITE_SIZE/2, 0, SPRITE_SIZE/2, SPRITE_SIZE/2, SPRITE_SIZE/2);
-      fbGrad.addColorStop(0, 'rgba(255,255,220,1)');
-      fbGrad.addColorStop(0.2, 'rgba(255,180,60,0.8)');
-      fbGrad.addColorStop(0.5, 'rgba(255,80,15,0.5)');
-      fbGrad.addColorStop(1, 'rgba(60,10,5,0)');
-      fbctx.fillStyle = fbGrad;
-      fbctx.fillRect(0, 0, SPRITE_SIZE, SPRITE_SIZE);
-    }
-    generateSprites();
-
     var fxParticles = [];   // sparks, debris
     var fxFireballs = [];
     var fxShockwaves = [];
@@ -242,7 +191,6 @@
       ['c-embers','embers',null,null],['c-bubbles','bubbles',null,null],
       ['c-glow','surfaceGlow',null,null],['c-glass','glass',null,null],
       ['c-autoAdapt','autoAdapt',null,null],['c-objectPooling','objectPooling',null,null],
-      ['c-useSprites','useSprites',null,null]
     ];
 
     // Explosion config bindings (stored in expCfg)
@@ -869,14 +817,10 @@
         var smokeAlpha = smoke.life * (1 - smoke.fadeIn) * 0.3;
         if (smokeAlpha < 0.01) continue;
         ctx.globalAlpha = smokeAlpha;
-        if (cfg.useSprites && smokeSprite) {
-          ctx.drawImage(smokeSprite, smoke.x - smoke.radius, smoke.y - smoke.radius, smoke.radius * 2, smoke.radius * 2);
-        } else {
-          ctx.fillStyle = '#555';
-          ctx.beginPath();
-          ctx.arc(smoke.x, smoke.y, smoke.radius, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        ctx.fillStyle = '#555';
+        ctx.beginPath();
+        ctx.arc(smoke.x, smoke.y, smoke.radius, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       // Fireballs (lighter composite, radial gradient)
@@ -885,19 +829,15 @@
         var fireball = fxFireballs[fi];
         if (fireball.life < 0.01) continue;
         ctx.globalAlpha = fireball.life * 0.8;
-        if (cfg.useSprites && fireballSprite) {
-          ctx.drawImage(fireballSprite, fireball.x - fireball.radius, fireball.y - fireball.radius, fireball.radius * 2, fireball.radius * 2);
-        } else {
-          var fbGrad = ctx.createRadialGradient(fireball.x, fireball.y, 0, fireball.x, fireball.y, fireball.radius);
-          fbGrad.addColorStop(0, 'rgba(255,255,255,0.9)');
-          fbGrad.addColorStop(0.2, 'rgba(255,255,100,0.7)');
-          fbGrad.addColorStop(0.5, 'rgba(255,160,20,0.4)');
-          fbGrad.addColorStop(1, 'rgba(80,20,0,0)');
-          ctx.fillStyle = fbGrad;
-          ctx.beginPath();
-          ctx.arc(fireball.x, fireball.y, fireball.radius, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        var fbGrad = ctx.createRadialGradient(fireball.x, fireball.y, 0, fireball.x, fireball.y, fireball.radius);
+        fbGrad.addColorStop(0, 'rgba(255,255,255,0.9)');
+        fbGrad.addColorStop(0.2, 'rgba(255,255,100,0.7)');
+        fbGrad.addColorStop(0.5, 'rgba(255,160,20,0.4)');
+        fbGrad.addColorStop(1, 'rgba(80,20,0,0)');
+        ctx.fillStyle = fbGrad;
+        ctx.beginPath();
+        ctx.arc(fireball.x, fireball.y, fireball.radius, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       // Shockwaves (lighter, three concentric rings)
