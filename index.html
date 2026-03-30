@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lava Orb — Liquid Test v2</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #111; overflow: hidden; font-family: -apple-system, sans-serif; }
+    #info { position: fixed; top: 8px; left: 8px; font: 12px monospace; color: #aaa;
+      background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 4px; z-index: 100; }
+    #panel { position: fixed; top: 8px; right: 8px; width: 230px;
+      background: rgba(0,0,0,0.75); padding: 10px; border-radius: 6px;
+      z-index: 100; font-size: 12px; color: #ccc; max-height: calc(100vh - 16px); overflow-y: auto; }
+    #panel .row { display: flex; align-items: center; justify-content: space-between; margin: 2px 0; }
+    #panel .row span { min-width: 32px; text-align: right; font: 11px monospace; color: #8cf; }
+    #panel input[type=range] { width: 80px; }
+    #panel label { display: flex; align-items: center; gap: 4px; margin: 2px 0; }
+    #panel .section { margin-top: 8px; border-top: 1px solid #333; padding-top: 6px; }
+    #panel .section-head { cursor: pointer; font-weight: 600; color: #4af; user-select: none; }
+    #panel .section-body { overflow: hidden; }
+    #panel .section-body.collapsed { max-height: 0 !important; }
+    #panel button { padding: 4px 8px; font-size: 11px; border: 1px solid #555; border-radius: 3px;
+      cursor: pointer; background: #222; color: #ccc; margin: 2px; }
+    #panel button:hover { background: #333; }
+    #panel select { background: #222; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 2px; font-size: 11px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="info">Drag & throw orbs. They merge on collision!<br><span id="dbg"></span></div>
+  <div id="panel">
+    <div style="font-weight:700;margin-bottom:6px;">💧 Liquid Controls</div>
+    <div style="margin-bottom:6px;">
+      <button id="btn-add" style="background:#264;color:#8f8;border-color:#4a8;">+ Add Orb</button>
+      <button id="btn-reset-orbs" style="background:#422;color:#f88;border-color:#844;">Clear All</button>
+    </div>
+    <div class="row"><label>Temperature</label><input type="range" id="c-val" min="1" max="10" value="5"><span id="v-val">5</span></div>
+    <div class="row"><label>Orb size</label><input type="range" id="c-orbsize" min="30" max="120" value="60"><span id="v-orbsize">60</span></div>
+    <div class="row"><label>Fill %</label><input type="range" id="c-fill" min="10" max="90" value="50"><span id="v-fill">50</span></div>
+    <div class="row"><label>Columns</label><input type="range" id="c-cols" min="8" max="48" value="24"><span id="v-cols">24</span></div>
+    <div class="row"><label>Spring</label><input type="range" id="c-spring" min="1" max="15" value="5"><span id="v-spring">.05</span></div>
+    <div class="row"><label>Damping</label><input type="range" id="c-damp" min="950" max="998" value="975"><span id="v-damp">.975</span></div>
+    <div class="row"><label>Sloshing</label><input type="range" id="c-slosh" min="1" max="30" value="10"><span id="v-slosh">1.0</span></div>
+    <div class="row"><label>Cracks</label><input type="range" id="c-cracks" min="0" max="12" value="0"><span id="v-cracks">0</span></div>
+    <div class="row"><label>Inner splash</label><input type="range" id="c-isplash" min="0" max="20" value="8"><span id="v-isplash">8</span></div>
+    <div class="row"><label>Outer splash</label><input type="range" id="c-osplash" min="0" max="20" value="5"><span id="v-osplash">5</span></div>
+    <div class="row"><label>Merge loss %</label><input type="range" id="c-mergeloss" min="0" max="50" value="25"><span id="v-mergeloss">25</span></div>
+
+    <div class="section">
+      <div class="section-head" onclick="this.nextElementSibling.classList.toggle('collapsed')">▸ Advanced</div>
+      <div class="section-body collapsed">
+        <div class="row"><label>Spread</label><input type="range" id="c-spread" min="5" max="50" value="25"><span id="v-spread">.25</span></div>
+        <div class="row"><label>Substeps</label><input type="range" id="c-substeps" min="1" max="8" value="4"><span id="v-substeps">4</span></div>
+        <div class="row"><label>Layers</label><input type="range" id="c-layers" min="1" max="5" value="3"><span id="v-layers">3</span></div>
+        <label><input type="checkbox" id="c-embers" checked> Embers</label>
+        <label><input type="checkbox" id="c-bubbles" checked> Bubbles</label>
+        <label><input type="checkbox" id="c-glow" checked> Surface glow</label>
+        <label><input type="checkbox" id="c-glass" checked> Glass highlight</label>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">Presets</div>
+      <div style="margin-top:4px;">
+        <button id="btn-save">Save</button>
+        <button id="btn-load">Load</button>
+        <input type="file" id="file-load" accept=".json" style="display:none;">
+      </div>
+      <select id="preset-list" style="margin-top:4px;">
+        <option value="">— built-in —</option>
+        <option value="water">Water</option>
+        <option value="lava">Lava</option>
+        <option value="mercury">Mercury</option>
+        <option value="jelly">Jelly</option>
+      </select>
+      <button id="btn-apply" style="margin-top:2px;">Apply</button>
+    </div>
+  </div>
+
+  <canvas id="c"></canvas>
+  <script>
+  (function() {
+    var C = document.getElementById('c'), X = C.getContext('2d');
+    C.width = innerWidth; C.height = innerHeight;
+    onresize = function() { C.width = innerWidth; C.height = innerHeight; };
+
+    var PALETTES = [null,
+      ['#6494ED','#8AB4FF','#2A4480','#4A74CD'],['#5A9DE6','#7CB8F0','#1A5090','#3A7DC6'],
+      ['#4FB8D0','#6FD8E8','#1A6878','#3098B0'],['#45C4AA','#65E4CA','#0A6050','#25A48A'],
+      ['#4ABA7A','#6ADA9A','#0A5A30','#2A9A5A'],['#7AB648','#9AD668','#3A5610','#5A9628'],
+      ['#B5A234','#D5C254','#5A4A08','#958214'],['#E09028','#FFB848','#6A3000','#C07010'],
+      ['#E8703A','#FF9060','#6A2008','#C8501A'],['#E05A5A','#FF7A7A','#6A1010','#C03A3A']
+    ];
+    function tempParams(v) {
+      var t = [
+        null,
+        {fill:.45,amp:0,speed:0,embers:0,bubble:0,frost:1},
+        {fill:.40,amp:.8,speed:.3,embers:0,bubble:0,frost:1},
+        {fill:.42,amp:1.2,speed:.5,embers:0,bubble:.1,frost:0},
+        {fill:.44,amp:1.8,speed:.7,embers:1,bubble:.2,frost:0},
+        {fill:.48,amp:2.5,speed:1,embers:3,bubble:.3,frost:0},
+        {fill:.50,amp:3,speed:1.2,embers:4,bubble:.4,frost:0},
+        {fill:.54,amp:3.5,speed:1.5,embers:5,bubble:.6,frost:0},
+        {fill:.58,amp:4.2,speed:1.8,embers:6,bubble:.8,frost:0},
+        {fill:.70,amp:5.5,speed:2.5,embers:10,bubble:1,frost:0},
+        {fill:.85,amp:7,speed:3.2,embers:12,bubble:1,frost:0}
+      ];
+      return t[Math.max(1,Math.min(10,v))];
+    }
+
+    var cfg = {
+      val:5, orbSize:60, fill:50, cols:24, spring:.05, damping:.975,
+      spread:.25, sloshing:1, cracks:0, innerSplash:8, outerSplash:5,
+      mergeLoss:25, substeps:4, layers:3,
+      embers:1, bubbles:1, surfaceGlow:1, glass:1
+    };
+    var PRESETS = {
+      water:   {val:4,spring:.04,damping:.98,spread:.3,sloshing:1.2,cols:32},
+      lava:    {val:9,spring:.03,damping:.99,spread:.15,sloshing:.6,cols:24},
+      mercury: {val:6,spring:.08,damping:.97,spread:.35,sloshing:.5,cols:20},
+      jelly:   {val:5,spring:.10,damping:.992,spread:.4,sloshing:2,cols:16}
+    };
+
+    // Bindings
+    var B = [
+      ['c-val','val',1,0],['c-orbsize','orbSize',1,0],['c-fill','fill',1,0],
+      ['c-cols','cols',1,0],['c-spring','spring',.01,2],['c-damp','damping',.001,3],
+      ['c-slosh','sloshing',.1,1],['c-cracks','cracks',1,0],
+      ['c-isplash','innerSplash',1,0],['c-osplash','outerSplash',1,0],
+      ['c-mergeloss','mergeLoss',1,0],['c-spread','spread',.01,2],
+      ['c-substeps','substeps',1,0],['c-layers','layers',1,0],
+      ['c-embers','embers',null,null],['c-bubbles','bubbles',null,null],
+      ['c-glow','surfaceGlow',null,null],['c-glass','glass',null,null]
+    ];
+    function syncUI() {
+      B.forEach(function(b) {
+        var el = document.getElementById(b[0]); if (!el) return;
+        if (b[2] === null) { el.checked = !!cfg[b[1]]; return; }
+        el.value = Math.round(cfg[b[1]] / b[2]);
+        var d = document.getElementById('v-' + b[1]); if (!d) d = el.nextElementSibling;
+        if (d && d.tagName === 'SPAN') d.textContent = b[3] > 0 ? cfg[b[1]].toFixed(b[3]) : cfg[b[1]];
+      });
+    }
+    B.forEach(function(b) {
+      var el = document.getElementById(b[0]); if (!el) return;
+      el.oninput = el.onchange = function() {
+        if (b[2] === null) { cfg[b[1]] = this.checked ? 1 : 0; return; }
+        cfg[b[1]] = +this.value * b[2];
+        var d = document.getElementById('v-' + b[1]); if (!d) d = el.nextElementSibling;
+        if (d && d.tagName === 'SPAN') d.textContent = b[3] > 0 ? cfg[b[1]].toFixed(b[3]) : cfg[b[1]];
+        // Fill slider updates all existing orbs
+        if (b[1] === 'fill') {
+          for (var oi = 0; oi < orbs.length; oi++) orbs[oi].fill = cfg.fill / 100;
+        }
+      };
+    });
+    syncUI();
+
+    document.getElementById('btn-save').onclick = function() {
+      var blob = new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
+      var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = 'liquid-preset-' + Date.now() + '.json'; a.click();
+    };
+    var fi = document.getElementById('file-load');
+    document.getElementById('btn-load').onclick = function(){ fi.click(); };
+    fi.onchange = function() {
+      var f = this.files[0]; if (!f) return;
+      var r = new FileReader(); r.onload = function(e) {
+        try { var d = JSON.parse(e.target.result); for (var k in d) if (k in cfg) cfg[k]=d[k]; syncUI(); } catch(e) {}
+      }; r.readAsText(f); this.value='';
+    };
+    document.getElementById('btn-apply').onclick = function() {
+      var n = document.getElementById('preset-list').value;
+      if (n && PRESETS[n]) { var p = PRESETS[n]; for (var k in p) if (k in cfg) cfg[k]=p[k]; syncUI(); }
+    };
+
+    // ========= CATMULL-ROM =========
+    function catmull(arr, frac) {
+      var n = arr.length, ci = Math.floor(frac), t = frac - ci;
+      var p0=arr[Math.max(0,ci-1)], p1=arr[Math.min(ci,n-1)],
+          p2=arr[Math.min(ci+1,n-1)], p3=arr[Math.min(ci+2,n-1)];
+      var t2=t*t, t3=t2*t;
+      return .5*((-p0+3*p1-3*p2+p3)*t3+(2*p0-5*p1+4*p2-p3)*t2+(-p0+p2)*t+2*p1);
+    }
+
+    // ========= ORB CLASS =========
+    function Orb(x, y, fill) {
+      this.x = x; this.y = y;
+      this.vx = 0; this.vy = 0;
+      this.fill = fill || cfg.fill / 100;
+      this.tilt = 0; this.tiltV = 0;
+      this.time = Math.random() * 100;
+      this.wH = new Float32Array(cfg.cols);
+      this.wV = new Float32Array(cfg.cols);
+      this.innerDrops = [];
+      this.dragging = false;
+      this.flying = false;
+      this.dragOff = {x:0, y:0};
+      this.hist = [];
+      this.dead = false;
+      this.mergeAnim = 0; // 0 = none, >0 = merging (shrinking)
+      this.mergeTarget = null;
+      // Wall drops (stuck on inner glass wall, dripping down)
+      this.wallDrops = [];
+      // Embers
+      this.embers = [];
+      for (var i = 0; i < 12; i++)
+        this.embers.push({x:Math.random(), y:.6+Math.random()*.3, vx:(Math.random()-.5)*.004,
+          vy:-.003-Math.random()*.005, size:1+Math.random()*2.5, life:Math.random()});
+    }
+
+    Orb.prototype.R = function() { return cfg.orbSize / 2; };
+
+    var orbs = [];
+    var outerDrops = []; // shared outer splashes
+    var mergeFlashes = []; // merge animation flashes
+
+    function addOrb(x, y, fill) {
+      orbs.push(new Orb(x || C.width/2, y || C.height/2, fill || cfg.fill/100));
+    }
+    addOrb(); // start with one
+
+    document.getElementById('btn-add').onclick = function() {
+      addOrb(C.width/2 + (Math.random()-.5)*200, C.height/3);
+    };
+    document.getElementById('btn-reset-orbs').onclick = function() {
+      orbs = []; outerDrops = []; mergeFlashes = []; addOrb();
+    };
+
+    // ========= DRAG =========
+    var _dragOrb = null;
+    C.addEventListener('mousedown', function(e) {
+      var R = cfg.orbSize / 2;
+      // Find closest orb
+      for (var i = orbs.length - 1; i >= 0; i--) {
+        var o = orbs[i]; if (o.dead || o.mergeAnim > 0) continue;
+        var dx = e.clientX - o.x, dy = e.clientY - o.y;
+        if (dx*dx + dy*dy < (R+30)*(R+30)) {
+          o.dragging = true; o.flying = false; o.vx = 0; o.vy = 0;
+          o.dragOff.x = dx; o.dragOff.y = dy;
+          o.hist = [{x:e.clientX, y:e.clientY, t:Date.now()}];
+          _dragOrb = o;
+          return;
+        }
+      }
+    });
+    document.addEventListener('mousemove', function(e) {
+      var o = _dragOrb; if (!o || !o.dragging) return;
+      var prevX = o.x;
+      o.x = e.clientX - o.dragOff.x; o.y = e.clientY - o.dragOff.y;
+      var dxM = o.x - prevX;
+      o.tiltV += dxM * .1 * cfg.sloshing;
+      var cols = o.wH.length;
+      for (var ci = 0; ci < cols; ci++) {
+        o.wV[ci] -= dxM * (ci/(cols-1)-.5) * .04 * cfg.sloshing;
+      }
+      o.hist.push({x:e.clientX, y:e.clientY, t:Date.now()});
+      if (o.hist.length > 6) o.hist.shift();
+    });
+    document.addEventListener('mouseup', function() {
+      var o = _dragOrb; if (!o) return;
+      o.dragging = false; _dragOrb = null;
+      if (o.hist.length >= 2) {
+        var a = o.hist[0], b = o.hist[o.hist.length-1];
+        var dt = Math.max(1, b.t - a.t);
+        o.vx = (b.x - a.x) / dt * 16; o.vy = (b.y - a.y) / dt * 16;
+        if (o.vx*o.vx + o.vy*o.vy > 1) o.flying = true;
+      }
+    });
+    // Click to shake
+    C.addEventListener('click', function(e) {
+      var R = cfg.orbSize / 2;
+      for (var i = 0; i < orbs.length; i++) {
+        var o = orbs[i]; if (o.dead) continue;
+        var dx = e.clientX - o.x, dy = e.clientY - o.y;
+        if (dx*dx + dy*dy < R*R) {
+          var clickCol = Math.floor((dx / R * .5 + .5) * o.wH.length);
+          clickCol = Math.max(0, Math.min(o.wH.length - 1, clickCol));
+          for (var ci = 0; ci < o.wH.length; ci++) {
+            var dist = Math.abs(ci - clickCol);
+            o.wV[ci] += Math.exp(-dist*dist/8) * 8 * cfg.sloshing;
+          }
+        }
+      }
+    });
+
+    // ========= SPAWN DROPS =========
+    function spawnDroplets(o, impactSpeed) {
+      var R = cfg.orbSize / 2, val = cfg.val;
+      var pal = PALETTES[val] || PALETTES[5];
+      var surfaceY = -R + cfg.orbSize * (1 - o.fill);
+      var absSpd = Math.abs(impactSpeed);
+
+      // Inner fountain — shoots up, then sticks to wall
+      var ic = Math.min(6, Math.floor(absSpd * cfg.innerSplash / 10));
+      for (var i = 0; i < ic; i++) {
+        o.innerDrops.push({
+          x: (Math.random()-.5) * R * .3, y: surfaceY,
+          vx: (Math.random()-.5) * 1.2, vy: -2 - Math.random() * absSpd * .4,
+          size: 1.5 + Math.random() * 2.5, life: 1, color: pal[~~(Math.random()*3)],
+          stuck: false, stuckTimer: 0, stuckX: 0, stuckY: 0, dripping: false
+        });
+      }
+      // Outer splash
+      var oc = Math.min(8, Math.floor(absSpd * cfg.outerSplash / 10));
+      for (var j = 0; j < oc; j++) {
+        var a = -Math.PI*.15 - Math.random()*Math.PI*.7;
+        var spd = 2 + Math.random() * absSpd * .5;
+        outerDrops.push({
+          x: o.x + (Math.random()-.5)*R*.5, y: o.y - R*.3,
+          vx: Math.cos(a)*spd + o.vx*.2, vy: Math.sin(a)*spd,
+          size: 1.5+Math.random()*3, life: 1, color: pal[~~(Math.random()*3)]
+        });
+      }
+    }
+
+    // ========= MERGE (cell division in reverse) =========
+    // Phase 1: orbs attract, bridge forms (t: 1.0 → 0.5)
+    // Phase 2: liquid transfers, donor shrinks (t: 0.5 → 0.0)
+    var activeMerge = null; // {a, b, t, totalFill, targetFill}
+
+    function startMerge(a, b) {
+      // a = receiver (larger), b = donor (smaller)
+      a.flying = false; a.dragging = false;
+      b.flying = false; b.dragging = false;
+      a.vx = (a.vx + b.vx) * .5; a.vy = (a.vy + b.vy) * .5;
+      b.vx = a.vx; b.vy = a.vy;
+
+      var totalFill = a.fill + b.fill;
+      var loss = cfg.mergeLoss / 100;
+      var targetFill = Math.min(0.95, totalFill * (1 - loss));
+
+      activeMerge = { a: a, b: b, t: 1.0, totalFill: totalFill, targetFill: targetFill,
+        aStartFill: a.fill, bStartFill: b.fill };
+
+      // Splash at contact point
+      var pal = PALETTES[cfg.val] || PALETTES[5];
+      var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      for (var i = 0; i < 8; i++) {
+        var ang = Math.random() * Math.PI * 2, spd = 2 + Math.random() * 3;
+        outerDrops.push({ x:mx, y:my, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd,
+          size:2+Math.random()*2, life:1, color:pal[~~(Math.random()*3)] });
+      }
+    }
+
+    function updateMerge() {
+      if (!activeMerge) return;
+      var m = activeMerge, a = m.a, b = m.b;
+      var R = cfg.orbSize / 2;
+
+      m.t -= 0.012 * _dt; // ~80 frames total
+
+      if (m.t > 0.5) {
+        // Phase 1: attract toward each other
+        var attract = (1 - m.t) * 2; // 0→1 during phase 1
+        var dx = a.x - b.x, dy = a.y - b.y;
+        var pull = .08 * _dt * (1 + attract);
+        b.x += dx * pull; b.y += dy * pull;
+        a.x -= dx * pull * .3; a.y -= dy * pull * .3;
+        // Liquid sloshes toward contact side
+        var contactSide = dx > 0 ? 0 : cfg.cols - 1; // which side faces the other orb
+        for (var ci = 0; ci < cfg.cols; ci++) {
+          var bias = 1 - Math.abs(ci - contactSide) / cfg.cols;
+          a.wV[ci] += bias * .3 * attract * _dt;
+          b.wV[ci] += bias * .3 * attract * _dt;
+        }
+      } else if (m.t > 0) {
+        // Phase 2: liquid transfers smoothly
+        var phase2 = (0.5 - m.t) / 0.5; // 0→1 during phase 2
+        // Receiver: interpolate from starting fill to target fill
+        a.fill = m.aStartFill + (m.targetFill - m.aStartFill) * phase2;
+        // Donor: interpolate from starting fill to near-zero
+        b.fill = Math.max(0.03, m.bStartFill * (1 - phase2));
+        // Keep attracting
+        var dx2 = a.x - b.x, dy2 = a.y - b.y;
+        b.x += dx2 * .05 * _dt; b.y += dy2 * .05 * _dt;
+        // Periodic splash drops during transfer
+        if (Math.random() < .15) {
+          var pal = PALETTES[cfg.val] || PALETTES[5];
+          var mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+          outerDrops.push({ x:mx+(Math.random()-.5)*R, y:my+(Math.random()-.5)*R,
+            vx:(Math.random()-.5)*2, vy:-1-Math.random()*2,
+            size:1+Math.random()*2, life:.8, color:pal[~~(Math.random()*3)] });
+        }
+      } else {
+        // Done — final transfer
+        a.fill = m.targetFill;
+        b.dead = true;
+        // Big slosh in receiver
+        for (var ci2 = 0; ci2 < cfg.cols; ci2++) {
+          a.wV[ci2] += (Math.random()-.5) * 8 * cfg.sloshing;
+        }
+        // Final flash
+        mergeFlashes.push({ x:a.x, y:a.y, r:R*1.5, life:1 });
+        activeMerge = null;
+      }
+    }
+
+    // Draw merging orbs as ONE combined shape (union of circles)
+    function drawMergedOrbs() {
+      if (!activeMerge) return false;
+      var m = activeMerge, oa = m.a, ob = m.b;
+      var R = cfg.orbSize / 2, S = cfg.orbSize;
+      var val = cfg.val, tp = tempParams(val), pal = PALETTES[val] || PALETTES[5];
+
+      // ---- COMBINED CLIP (union of two circles) ----
+      X.save();
+      X.beginPath();
+      X.arc(oa.x, oa.y, R, 0, Math.PI * 2);
+      X.arc(ob.x, ob.y, R, 0, Math.PI * 2);
+      X.clip(); // nonzero winding = union
+
+      // Background across both
+      var minX = Math.min(oa.x, ob.x) - R, maxX = Math.max(oa.x, ob.x) + R;
+      var minY = Math.min(oa.y, ob.y) - R, maxY = Math.max(oa.y, ob.y) + R;
+      var bg = X.createRadialGradient(oa.x - R*.3, oa.y - R*.3, 0, oa.x, oa.y, R*2);
+      bg.addColorStop(0, val >= 9 ? '#2a1510' : '#1a1a2e');
+      bg.addColorStop(1, val >= 9 ? '#150808' : '#0a0a15');
+      X.fillStyle = bg;
+      X.fillRect(minX, minY, maxX - minX, maxY - minY);
+
+      // ---- SHARED LIQUID across both orbs ----
+      // Draw liquid for receiver
+      var drawLiquid = function(o) {
+        var baseY = o.y - R + S * (1 - o.fill);
+        var layers = [
+          {am:1,fr:1,sp:.8,ci:2,al:1},{am:.8,fr:1.5,sp:1.2,ci:0,al:.7},{am:.6,fr:2.2,sp:1.5,ci:1,al:.6}
+        ];
+        for (var li = 0; li < Math.min(cfg.layers, 3); li++) {
+          var ld = layers[li];
+          X.beginPath();
+          for (var lx = 0; lx <= S; lx++) {
+            var px = o.x - R + lx;
+            var colFrac = lx / S * (cfg.cols - 1);
+            var wOff = catmull(o.wH, colFrac);
+            var wy = baseY + Math.sin(lx*.1*ld.fr + o.time*tp.speed*ld.sp)*tp.amp*ld.am
+              + Math.sin(lx*.17*ld.fr + o.time*tp.speed*ld.sp*.6)*tp.amp*ld.am*.5
+              + (o.tilt * (lx - R) / R) * (3 + val*.5) + wOff;
+            lx === 0 ? X.moveTo(px, wy) : X.lineTo(px, wy);
+          }
+          X.lineTo(o.x + R, o.y + R); X.lineTo(o.x - R, o.y + R); X.closePath();
+          var lg = X.createLinearGradient(0, baseY, 0, o.y + R);
+          lg.addColorStop(0, pal[ld.ci]); lg.addColorStop(.6, pal[2]); lg.addColorStop(1, '#000');
+          X.fillStyle = lg; X.globalAlpha = ld.al; X.fill();
+        }
+        X.globalAlpha = 1;
+      };
+      drawLiquid(ob); // donor behind
+      drawLiquid(oa); // receiver front
+
+      // Inner drops
+      var drawInnerDrops = function(o) {
+        for (var di = 0; di < o.innerDrops.length; di++) {
+          var dr = o.innerDrops[di];
+          var dx2 = (dr.stuck ? dr.stuckX : dr.x) + o.x;
+          var dy2 = (dr.stuck ? dr.stuckY : dr.y) + o.y;
+          if (dr.dripping) { dx2 = dr.stuckX + o.x; dy2 = dr.y + o.y; }
+          X.globalAlpha = dr.life * .8; X.fillStyle = dr.color;
+          X.beginPath(); X.arc(dx2, dy2, dr.size, 0, Math.PI*2); X.fill();
+        }
+      };
+      drawInnerDrops(ob);
+      drawInnerDrops(oa);
+      X.globalAlpha = 1;
+
+      X.restore(); // unclip
+
+      // ---- GLASS on outer edges only (not at intersection) ----
+      // Draw glass for each orb but NOT where they overlap
+      var drawGlass = function(o, other) {
+        if (!cfg.glass) return;
+        var dx = other.x - o.x, dy = other.y - o.y;
+        var dist = Math.sqrt(dx*dx + dy*dy);
+        var overlapAngle = dist < R * 2 ? Math.acos(Math.min(1, dist / (2 * R))) : 0;
+        var angleToOther = Math.atan2(dy, dx);
+
+        // Draw arc excluding the overlap zone
+        X.beginPath();
+        X.arc(o.x, o.y, R, angleToOther + overlapAngle, angleToOther - overlapAngle + Math.PI * 2);
+        X.strokeStyle = 'rgba(255,255,255,.08)'; X.lineWidth = 1; X.stroke();
+
+        // Top highlight
+        var hg = X.createRadialGradient(o.x-R*.2, o.y-R*.55, 0, o.x-R*.1, o.y-R*.3, R*.6);
+        hg.addColorStop(0, 'rgba(255,255,255,.2)'); hg.addColorStop(1, 'rgba(255,255,255,0)');
+        X.fillStyle = hg;
+        X.beginPath(); X.arc(o.x, o.y, R-1, 0, Math.PI*2); X.fill();
+      };
+      drawGlass(oa, ob);
+      drawGlass(ob, oa);
+
+      // Fill % labels
+      X.fillStyle = 'rgba(255,255,255,.4)'; X.font = '10px monospace';
+      X.fillText(Math.round(oa.fill*100)+'%', oa.x-R+4, oa.y+R-4);
+      X.fillText(Math.round(ob.fill*100)+'%', ob.x-R+4, ob.y+R-4);
+
+      return true; // signals that merge orbs were drawn
+    }
+
+    // ========= MAIN LOOP =========
+    var _dt = 1, _lt = 0, _fps = 60, _fc = 0, _ft = 0, _time = 0;
+
+    function loop(ts) {
+      if (_lt > 0) _dt = Math.min((ts - _lt) / 16.667, 3);
+      _lt = ts; _fc++;
+      if (ts - _ft > 500) { _fps = Math.round(_fc * 1000 / (ts - _ft)); _fc = 0; _ft = ts; }
+
+      _time += .06 * _dt;
+      var S = cfg.orbSize, R = S / 2;
+      var val = cfg.val, tp = tempParams(val), pal = PALETTES[val] || PALETTES[5];
+
+      // ---- UPDATE EACH ORB ----
+      for (var oi = 0; oi < orbs.length; oi++) {
+        var o = orbs[oi];
+        if (o.dead) continue;
+        o.time += .06 * _dt;
+
+        // Skip movement physics during active merge (handled by updateMerge)
+        var inMerge = activeMerge && (o === activeMerge.a || o === activeMerge.b);
+
+        if (!inMerge && o.flying && !o.dragging) {
+          o.vy += .15 * _dt;
+          o.vx *= Math.pow(.998, _dt);
+          o.x += o.vx * _dt; o.y += o.vy * _dt;
+          if (o.y > C.height - R) {
+            var prevVy = o.vy;
+            o.y = C.height - R; o.vy = -o.vy * .55;
+            var dvy = o.vy - prevVy;
+            if (Math.abs(dvy) > 1) {
+              // Wave from center
+              var mid = (cfg.cols-1)/2;
+              for (var ci=0; ci<cfg.cols; ci++) {
+                var d = (ci-mid)/(cfg.cols*.3);
+                o.wV[ci] += dvy * .4 * cfg.sloshing * Math.exp(-d*d*.5);
+              }
+              if (Math.abs(dvy) > 2) spawnDroplets(o, dvy);
+            }
+            if (Math.abs(o.vy) < .5) { o.flying = false; o.vx = o.vy = 0; }
+          }
+          if (o.y < R) { o.y = R; o.vy = -o.vy * .55; }
+          if (o.x < R) { o.x = R; o.vx = -o.vx * .55; }
+          if (o.x > C.width - R) { o.x = C.width - R; o.vx = -o.vx * .55; }
+          if (Math.abs(o.vx) > 1) o.tiltV -= o.vx * .03 * cfg.sloshing * _dt;
+        }
+        if (!inMerge && !o.dragging && !o.flying) { o.vx *= .92; o.vy *= .92; }
+
+        // Tilt
+        o.tilt += o.tiltV * _dt;
+        o.tiltV *= Math.pow(.92, _dt);
+        o.tiltV -= o.tilt * .06 * _dt;
+
+        // Resize wave arrays if cols changed
+        if (o.wH.length !== cfg.cols) {
+          o.wH = new Float32Array(cfg.cols);
+          o.wV = new Float32Array(cfg.cols);
+        }
+
+        // Wave physics
+        var cols = cfg.cols;
+        var sf = Math.min(1, 24 / cols);
+        var sdt = _dt * sf;
+        var maxAmp = S * .4;
+        for (var step = 0; step < cfg.substeps; step++) {
+          for (var i = 0; i < cols; i++) {
+            o.wV[i] += -cfg.spring * o.wH[i] * sdt;
+            o.wV[i] *= Math.pow(cfg.damping, sdt);
+            o.wH[i] += o.wV[i] * sdt * .25;
+            if (o.wH[i] > maxAmp) { o.wH[i] = maxAmp; o.wV[i] *= .5; }
+            if (o.wH[i] < -maxAmp) { o.wH[i] = -maxAmp; o.wV[i] *= .5; }
+          }
+          for (var i2 = 0; i2 < cols; i2++) {
+            if (i2 > 0) { var d1 = (o.wH[i2]-o.wH[i2-1])*cfg.spread*sdt; o.wV[i2]-=d1; o.wV[i2-1]+=d1; }
+            if (i2 < cols-1) { var d2 = (o.wH[i2]-o.wH[i2+1])*cfg.spread*sdt; o.wV[i2]-=d2; o.wV[i2+1]+=d2; }
+          }
+        }
+        if (!isFinite(o.wH[0])) { for (var fi=0;fi<cols;fi++){o.wH[fi]=0;o.wV[fi]=0;} }
+
+        // Inner drops physics (with wall sticking)
+        for (var di = o.innerDrops.length - 1; di >= 0; di--) {
+          var dr = o.innerDrops[di];
+          if (dr.stuck) {
+            dr.stuckTimer -= _dt;
+            if (dr.stuckTimer <= 0) {
+              // Drip down along wall
+              dr.dripping = true;
+              dr.stuck = false;
+            }
+            continue;
+          }
+          if (dr.dripping) {
+            // Slide down inner wall
+            dr.y += 0.8 * _dt;
+            dr.life -= .015 * _dt;
+            var surfY = -R + S * (1 - o.fill);
+            if (dr.life <= 0 || dr.y > surfY) { o.innerDrops.splice(di, 1); continue; }
+            continue;
+          }
+          dr.x += dr.vx * _dt; dr.y += dr.vy * _dt;
+          dr.vy += .12 * _dt;
+          dr.life -= .015 * _dt;
+          // Check if hit inner wall of sphere
+          var distFromCenter = Math.sqrt(dr.x*dr.x + dr.y*dr.y);
+          if (distFromCenter > R * .88) {
+            // Stick to wall!
+            dr.stuck = true;
+            dr.stuckTimer = 15 + Math.random() * 25; // frames stuck
+            dr.stuckX = dr.x; dr.stuckY = dr.y;
+            dr.vx = 0; dr.vy = 0;
+            continue;
+          }
+          var surfY2 = -R + S * (1 - o.fill);
+          if (dr.life <= 0 || dr.y > surfY2 + 3) { o.innerDrops.splice(di, 1); }
+        }
+      }
+
+      // ---- ORB-ORB COLLISION (merge) ----
+      if (!activeMerge) {
+        for (var a = 0; a < orbs.length; a++) {
+          for (var b2 = a + 1; b2 < orbs.length; b2++) {
+            var oa = orbs[a], ob = orbs[b2];
+            if (oa.dead || ob.dead) continue;
+            var cdx = oa.x - ob.x, cdy = oa.y - ob.y;
+            var cdist = Math.sqrt(cdx*cdx + cdy*cdy);
+            if (cdist < S * .9) {
+              if (oa.fill >= ob.fill) startMerge(oa, ob);
+              else startMerge(ob, oa);
+              break;
+            }
+          }
+          if (activeMerge) break; // one merge at a time
+        }
+      }
+
+      // Update active merge animation
+      updateMerge();
+
+      // Clean dead orbs
+      for (var ci2 = orbs.length - 1; ci2 >= 0; ci2--) {
+        if (orbs[ci2].dead) orbs.splice(ci2, 1);
+      }
+
+      // ---- RENDER ----
+      X.clearRect(0, 0, C.width, C.height);
+
+      // Draw each orb (during merge: donor first = behind, receiver last = front)
+      var drawOrder = [];
+      for (var oi2 = 0; oi2 < orbs.length; oi2++) {
+        if (orbs[oi2].dead) continue;
+        drawOrder.push(orbs[oi2]);
+      }
+      if (activeMerge) {
+        // Sort: donor (b) first, receiver (a) last
+        drawOrder.sort(function(x, y) {
+          if (x === activeMerge.b) return -1;
+          if (y === activeMerge.b) return 1;
+          if (x === activeMerge.a) return 1;
+          if (y === activeMerge.a) return -1;
+          return 0;
+        });
+      }
+      // Draw merged orbs as one combined shape (if active merge)
+      var mergedDrawn = drawMergedOrbs();
+
+      for (var oi3 = 0; oi3 < drawOrder.length; oi3++) {
+        var o = drawOrder[oi3];
+        // Skip merge participants — already drawn by drawMergedOrbs
+        if (mergedDrawn && activeMerge && (o === activeMerge.a || o === activeMerge.b)) continue;
+        var oR = R;
+
+        X.save();
+        X.translate(o.x, o.y);
+
+        // Clip
+        X.save();
+        X.beginPath(); X.arc(0, 0, oR - .5, 0, Math.PI * 2); X.clip();
+
+        // Background
+        var bg = X.createRadialGradient(-oR*.3, -oR*.3, 0, 0, 0, oR);
+        bg.addColorStop(0, val >= 9 ? '#2a1510' : '#1a1a2e');
+        bg.addColorStop(1, val >= 9 ? '#150808' : '#0a0a15');
+        X.fillStyle = bg; X.fillRect(-oR, -oR, oR*2, oR*2);
+
+        // Liquid
+        var baseY = -oR + oR * 2 * (1 - o.fill);
+        var layerDefs = [
+          {am:1,fr:1,sp:.8,ci:2,al:1},{am:.8,fr:1.5,sp:1.2,ci:0,al:.7},{am:.6,fr:2.2,sp:1.5,ci:1,al:.6},
+          {am:.4,fr:3,sp:2,ci:3,al:.4},{am:.3,fr:4,sp:2.5,ci:0,al:.3}
+        ];
+        for (var li = 0; li < Math.min(cfg.layers, 5); li++) {
+          var ld = layerDefs[li];
+          X.beginPath();
+          for (var lx = 0; lx <= S; lx++) {
+            var px = lx - oR;
+            var colFrac = lx / S * (cfg.cols - 1);
+            var wOff = catmull(o.wH, colFrac);
+            var wy = baseY + Math.sin(lx*.1*ld.fr + o.time*tp.speed*ld.sp)*tp.amp*ld.am
+              + Math.sin(lx*.17*ld.fr + o.time*tp.speed*ld.sp*.6)*tp.amp*ld.am*.5
+              + (o.tilt * px / oR) * (3 + val*.5) + wOff;
+            lx === 0 ? X.moveTo(px, wy) : X.lineTo(px, wy);
+          }
+          X.lineTo(oR, oR); X.lineTo(-oR, oR); X.closePath();
+          var lg = X.createLinearGradient(0, baseY, 0, oR);
+          lg.addColorStop(0, pal[ld.ci]); lg.addColorStop(.6, pal[2]); lg.addColorStop(1, '#000');
+          X.fillStyle = lg; X.globalAlpha = ld.al; X.fill();
+        }
+        X.globalAlpha = 1;
+
+        // Surface glow
+        if (cfg.surfaceGlow && val >= 5) {
+          var gi = (val-4)/6;
+          var sg = X.createRadialGradient(0,baseY,0, 0,baseY,oR*.9);
+          sg.addColorStop(0,'rgba(255,220,80,'+(0.15+gi*.4).toFixed(2)+')');
+          sg.addColorStop(1,'rgba(255,100,0,0)');
+          X.fillStyle = sg; X.fillRect(-oR,baseY-10,S,20);
+        }
+
+        // Bubbles
+        if (cfg.bubbles && tp.bubble > .1) {
+          for (var bi = 0; bi < Math.floor(tp.bubble*6); bi++) {
+            var bx = Math.sin(o.time*.8+bi*4.3)*oR*.5;
+            var by = baseY + 5 + ((o.time*20+bi*17) % (oR-baseY+oR));
+            X.beginPath(); X.arc(bx,by,Math.max(.5,1+tp.bubble*1.5),0,Math.PI*2);
+            X.fillStyle='rgba(255,255,255,.12)'; X.fill();
+          }
+        }
+
+        // Embers
+        if (cfg.embers) {
+          var ae = Math.min(tp.embers, o.embers.length);
+          for (var ei = 0; ei < ae; ei++) {
+            var em = o.embers[ei];
+            em.x += em.vx*_dt; em.y += em.vy*_dt; em.life += .005*_dt;
+            if (em.life > 1 || em.y < (1-o.fill)-.05) { em.life=0; em.y=.6+Math.random()*.3; em.x=Math.random(); }
+            var ex = (em.x-.5)*S, ey = -oR + em.y*S;
+            X.beginPath(); X.arc(ex,ey,em.size,0,Math.PI*2);
+            X.fillStyle = val>=8 ? 'rgba(255,200,60,.5)' : 'rgba(200,200,255,.3)'; X.fill();
+          }
+        }
+
+        // Inner drops (fountain + stuck on wall + dripping)
+        for (var di2 = 0; di2 < o.innerDrops.length; di2++) {
+          var dr = o.innerDrops[di2];
+          var dx2 = dr.stuck ? dr.stuckX : dr.x;
+          var dy2 = dr.stuck ? dr.stuckY : dr.y;
+          if (dr.dripping) { dx2 = dr.stuckX; dy2 = dr.y; }
+          X.globalAlpha = dr.life * .8;
+          X.fillStyle = dr.color;
+          X.beginPath(); X.arc(dx2, dy2, dr.size, 0, Math.PI*2); X.fill();
+          if (!dr.stuck && !dr.dripping) {
+            X.globalAlpha = dr.life * .3;
+            X.beginPath(); X.arc(dx2 - dr.vx*.3, dy2 - dr.vy*.3, dr.size*.6, 0, Math.PI*2); X.fill();
+          }
+        }
+        X.globalAlpha = 1;
+
+        X.restore(); // unclip
+
+        // Cracks
+        if (cfg.cracks > 0) {
+          X.save(); X.beginPath(); X.arc(0,0,oR,0,Math.PI*2); X.clip();
+          X.strokeStyle = 'rgba(200,220,255,.3)'; X.lineWidth = .8;
+          for (var cri = 0; cri < cfg.cracks; cri++) {
+            var cs = cri*7.31+1.23, ca = cs%(Math.PI*2), cl = oR*(.4+(Math.sin(cs*3.7)*.5+.5)*.5);
+            var cx = Math.cos(ca)*oR*.15, cy = Math.sin(ca)*oR*.15;
+            X.beginPath(); X.moveTo(cx,cy);
+            var segs = 3+Math.floor(Math.sin(cs*2.1)*2+2);
+            for (var seg=1;seg<=segs;seg++) {
+              var t2=seg/segs, sa=ca+Math.sin(cs*seg*1.7)*.3, sr=oR*.15+cl*t2;
+              cx=Math.cos(sa)*sr; cy=Math.sin(sa)*sr; X.lineTo(cx,cy);
+              if (seg>=2&&Math.sin(cs*seg*4.3)>.3) {
+                var ba=sa+(Math.sin(cs*seg)>0?.5:-.5), bl=cl*.25;
+                X.lineTo(cx+Math.cos(ba)*bl,cy+Math.sin(ba)*bl); X.moveTo(cx,cy);
+              }
+            }
+            X.stroke();
+          }
+          X.restore();
+        }
+
+        // Glass
+        if (cfg.glass) {
+          X.beginPath(); X.arc(0,0,oR,0,Math.PI*2);
+          X.strokeStyle='rgba(255,255,255,.08)'; X.lineWidth=1; X.stroke();
+          var hg = X.createRadialGradient(-oR*.2,-oR*.55,0,-oR*.1,-oR*.3,oR*.6);
+          hg.addColorStop(0,'rgba(255,255,255,.25)'); hg.addColorStop(1,'rgba(255,255,255,0)');
+          X.fillStyle = hg; X.beginPath(); X.arc(0,0,oR-1,0,Math.PI*2); X.fill();
+        }
+
+        // Fill indicator
+        X.fillStyle = 'rgba(255,255,255,.4)'; X.font = '10px monospace';
+        X.fillText(Math.round(o.fill*100)+'%', -oR+4, oR-4);
+
+        X.restore(); // untranslate
+      }
+
+      // Outer drops
+      for (var odi = outerDrops.length - 1; odi >= 0; odi--) {
+        var od = outerDrops[odi];
+        od.x += od.vx*_dt; od.y += od.vy*_dt; od.vy += .15*_dt; od.life -= .02*_dt;
+        if (od.life <= 0 || od.y > C.height) { outerDrops.splice(odi,1); continue; }
+        X.globalAlpha = od.life; X.fillStyle = od.color;
+        X.beginPath(); X.arc(od.x,od.y,od.size*od.life,0,Math.PI*2); X.fill();
+      }
+
+      // Merge flashes
+      for (var mfi = mergeFlashes.length - 1; mfi >= 0; mfi--) {
+        var mf = mergeFlashes[mfi];
+        mf.life -= .04 * _dt;
+        if (mf.life <= 0) { mergeFlashes.splice(mfi,1); continue; }
+        var mr = mf.r * (2 - mf.life);
+        var mg = X.createRadialGradient(mf.x,mf.y,0,mf.x,mf.y,mr);
+        mg.addColorStop(0, 'rgba(255,255,255,'+(mf.life*.5).toFixed(2)+')');
+        mg.addColorStop(.5, 'rgba(200,200,255,'+(mf.life*.2).toFixed(2)+')');
+        mg.addColorStop(1, 'rgba(100,100,255,0)');
+        X.fillStyle = mg; X.beginPath(); X.arc(mf.x,mf.y,mr,0,Math.PI*2); X.fill();
+      }
+      X.globalAlpha = 1;
+
+      // Debug
+      var fills = orbs.map(function(o){ return Math.round(o.fill*100); }).join(',');
+      document.getElementById('dbg').textContent =
+        _fps+' fps | orbs='+orbs.length+' | fills=['+fills+'] | drops='+outerDrops.length;
+
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  })();
+  </script>
+</body>
+</html>
