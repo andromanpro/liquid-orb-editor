@@ -51,6 +51,7 @@
         <div class="row"><label>Spread</label><input type="range" id="c-spread" min="5" max="50" value="25"><span id="v-spread">.25</span></div>
         <div class="row"><label>Substeps</label><input type="range" id="c-substeps" min="1" max="8" value="4"><span id="v-substeps">4</span></div>
         <div class="row"><label>Layers</label><input type="range" id="c-layers" min="1" max="5" value="3"><span id="v-layers">3</span></div>
+        <label><input type="checkbox" id="c-showFill"> Show fill %</label>
         <label><input type="checkbox" id="c-embers" checked> Embers</label>
         <label><input type="checkbox" id="c-bubbles" checked> Bubbles</label>
         <label><input type="checkbox" id="c-glow" checked> Surface glow</label>
@@ -111,7 +112,7 @@
       val:5, orbSize:60, fill:50, cols:24, spring:.05, damping:.975,
       spread:.25, sloshing:1, cracks:0, innerSplash:8, outerSplash:5,
       mergeLoss:25, substeps:4, layers:3,
-      embers:1, bubbles:1, surfaceGlow:1, glass:1
+      showFill:0, embers:1, bubbles:1, surfaceGlow:1, glass:1
     };
     var PRESETS = {
       water:   {val:4,spring:.04,damping:.98,spread:.3,sloshing:1.2,cols:32},
@@ -128,6 +129,7 @@
       ['c-isplash','innerSplash',1,0],['c-osplash','outerSplash',1,0],
       ['c-mergeloss','mergeLoss',1,0],['c-spread','spread',.01,2],
       ['c-substeps','substeps',1,0],['c-layers','layers',1,0],
+      ['c-showFill','showFill',null,null],
       ['c-embers','embers',null,null],['c-bubbles','bubbles',null,null],
       ['c-glow','surfaceGlow',null,null],['c-glass','glass',null,null]
     ];
@@ -489,8 +491,10 @@
 
       // Fill % labels
       X.fillStyle = 'rgba(255,255,255,.4)'; X.font = '10px monospace';
-      X.fillText(Math.round(oa.fill*100)+'%', oa.x-R+4, oa.y+R-4);
-      X.fillText(Math.round(ob.fill*100)+'%', ob.x-R+4, ob.y+R-4);
+      if (cfg.showFill) {
+        X.fillText(Math.round(oa.fill*100)+'%', oa.x-R+4, oa.y+R-4);
+        X.fillText(Math.round(ob.fill*100)+'%', ob.x-R+4, ob.y+R-4);
+      }
 
       return true; // signals that merge orbs were drawn
     }
@@ -786,7 +790,7 @@
 
         // Fill indicator
         X.fillStyle = 'rgba(255,255,255,.4)'; X.font = '10px monospace';
-        X.fillText(Math.round(o.fill*100)+'%', -oR+4, oR-4);
+        if (cfg.showFill) X.fillText(Math.round(o.fill*100)+'%', -oR+4, oR-4);
 
         X.restore(); // untranslate
       }
