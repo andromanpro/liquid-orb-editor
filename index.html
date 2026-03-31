@@ -24,6 +24,8 @@
     #panel button:hover { background: #333; }
     #panel select { background: #222; color: #ccc; border: 1px solid #555; border-radius: 3px; padding: 2px; font-size: 11px; width: 100%; }
     #perf-stats { font: 11px monospace; color: #8f8; margin-top: 4px; }
+    canvas#c { display: block; position: relative; z-index: 1; }
+    canvas#gl { position: fixed; top: 0; left: 0; z-index: 0; display: none; }
   </style>
 </head>
 <body>
@@ -33,6 +35,7 @@
     <div style="margin-bottom:6px;">
       <button id="btn-add" style="background:#264;color:#8f8;border-color:#4a8;">+ Add Orb</button>
       <button id="btn-reset-orbs" style="background:#422;color:#f88;border-color:#844;">Clear All</button>
+      <label style="font-size:11px;color:#8cf;gap:3px;margin-left:6px;"><input type="checkbox" id="c-webgl2"> WebGL2</label>
     </div>
     <div class="row"><label>Temperature</label><input type="range" id="c-val" min="1" max="10" value="5"><span id="v-val">5</span></div>
     <div class="row"><label>Orb size</label><input type="range" id="c-orbsize" min="30" max="120" value="60"><span id="v-orbsize">60</span></div>
@@ -108,12 +111,34 @@
     </div>
   </div>
 
+  <canvas id="gl"></canvas>
   <canvas id="c"></canvas>
   <script>
   (function() {
     var canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
     canvas.width = innerWidth; canvas.height = innerHeight;
-    onresize = function() { canvas.width = innerWidth; canvas.height = innerHeight; };
+    onresize = function() {
+      canvas.width = innerWidth; canvas.height = innerHeight;
+      if (RENDERER === 'webgl2') {
+        glCanvas.width = innerWidth; glCanvas.height = innerHeight;
+        glW = innerWidth; glH = innerHeight;
+      }
+    };
+
+    // ========= RENDERER TOGGLE =========
+    var RENDERER = 'canvas2d';
+    var glCanvas = document.getElementById('gl');
+    var gl = null;
+    var glW = 0, glH = 0;
+    var glProgLiquid = null;
+    var glQuad = null; // {vao, count}
+
+    function hexToRGB(hex) {
+      var r = parseInt(hex.substr(1,2), 16) / 255;
+      var g = parseInt(hex.substr(3,2), 16) / 255;
+      var b = parseInt(hex.substr(5,2), 16) / 255;
+      return [r, g, b];
+    }
 
     var PALETTES = [null,
       ['#6494ED','#8AB4FF','#2A4480','#4A74CD'],['#5A9DE6','#7CB8F0','#1A5090','#3A7DC6'],
@@ -122,6 +147,12 @@
       ['#B5A234','#D5C254','#5A4A08','#958214'],['#E09028','#FFB848','#6A3000','#C07010'],
       ['#E8703A','#FF9060','#6A2008','#C8501A'],['#E05A5A','#FF7A7A','#6A1010','#C03A3A']
     ];
+    var PALETTE_RGB = [];
+    for (var _pi = 0; _pi <= 10; _pi++) {
+      if (!PALETTES[_pi]) { PALETTE_RGB.push(null); continue; }
+      PALETTE_RGB.push(PALETTES[_pi].map(hexToRGB));
+    }
+
     function tempParams(val) {
       var table = [
         null,
@@ -163,6 +194,303 @@
       lava:    {val:9,spring:.03,damping:.99,spread:.15,sloshing:.6,cols:24},
       mercury: {val:6,spring:.08,damping:.97,spread:.35,sloshing:.5,cols:20},
       jelly:   {val:5,spring:.10,damping:.992,spread:.4,sloshing:2,cols:16}
+    };
+
+    // ========= WEBGL2 SHADERS =========
+    var VS_LIQUID = '#version 300 es\n' +
+      'layout(location=0) in vec2 a_Coord;\n' +
+      'layout(location=1) in vec2 a_TexCoord;\n' +
+      'uniform mat4 u_Proj;\n' +
+      'uniform vec2 u_Pos;\n' +
+      'uniform float u_QuadSize;\n' +
+      'out vec2 v_UV;\n' +
+      'void main() {\n' +
+      '  gl_Position = u_Proj * vec4(u_Pos + a_Coord * u_QuadSize, 0.0, 1.0);\n' +
+      '  v_UV = a_TexCoord;\n' +
+      '}\n';
+
+    var FS_LIQUID = '#version 300 es\n' +
+      'precision mediump float;\n' +
+      'in vec2 v_UV;\n' +
+      'uniform float u_OrbRadius;\n' +
+      'uniform float u_Fill;\n' +
+      'uniform float u_Tilt;\n' +
+      'uniform float u_Time;\n' +
+      'uniform float u_Val;\n' +
+      'uniform int u_Cols;\n' +
+      'uniform int u_Layers;\n' +
+      'uniform float u_WaveH[48];\n' +
+      'uniform float u_Amp;\n' +
+      'uniform float u_Speed;\n' +
+      'uniform vec3 u_Pal[4];\n' +
+      'uniform float u_GlowEnabled;\n' +
+      'out vec4 fragColor;\n' +
+      // Catmull-Rom interpolation
+      'float catmullRom(float idx) {\n' +
+      '  int i = int(floor(idx));\n' +
+      '  float t = fract(idx);\n' +
+      '  float p0 = u_WaveH[clamp(i-1, 0, u_Cols-1)];\n' +
+      '  float p1 = u_WaveH[clamp(i, 0, u_Cols-1)];\n' +
+      '  float p2 = u_WaveH[clamp(i+1, 0, u_Cols-1)];\n' +
+      '  float p3 = u_WaveH[clamp(i+2, 0, u_Cols-1)];\n' +
+      '  float t2 = t*t, t3 = t2*t;\n' +
+      '  return 0.5 * ((2.0*p1) + (-p0+p2)*t + (2.0*p0-5.0*p1+4.0*p2-p3)*t2 + (-p0+3.0*p1-3.0*p2+p3)*t3);\n' +
+      '}\n' +
+      // Wave surface Y at local X
+      'float waveSurface(float localX, float am, float fr, float sp) {\n' +
+      '  float oR = u_OrbRadius;\n' +
+      '  float orbSize = oR * 2.0;\n' +
+      '  float baseY = -oR + orbSize * (1.0 - u_Fill);\n' +
+      '  float lx = localX + oR;\n' +
+      '  float colFrac = lx / orbSize * float(u_Cols - 1);\n' +
+      '  float wOff = catmullRom(colFrac);\n' +
+      '  return baseY\n' +
+      '    + sin(lx * 0.1 * fr + u_Time * u_Speed * sp) * u_Amp * am\n' +
+      '    + sin(lx * 0.17 * fr + u_Time * u_Speed * sp * 0.6) * u_Amp * am * 0.5\n' +
+      '    + (u_Tilt * localX / oR) * (3.0 + u_Val * 0.5)\n' +
+      '    + wOff;\n' +
+      '}\n' +
+      'void main() {\n' +
+      '  vec2 uv = v_UV - 0.5;\n' +
+      '  float dist = length(uv) * 2.0;\n' +
+      '  if (dist >= 1.0) discard;\n' +
+      '  uv.y = -uv.y;\n' +  // Flip Y: GPU↑ → Canvas2D↓
+      '  float oR = u_OrbRadius;\n' +
+      '  float orbSize = oR * 2.0;\n' +
+      '  float localX = uv.x * orbSize;\n' +
+      '  float localY = uv.y * orbSize;\n' +
+      // Background gradient
+      '  vec2 bgOff = uv * 2.0 + vec2(0.3, 0.3);\n' +
+      '  float bgD = length(bgOff);\n' +
+      '  vec3 bgIn = u_Val >= 9.0 ? vec3(0.165,0.082,0.063) : vec3(0.102,0.102,0.180);\n' +
+      '  vec3 bgOut = u_Val >= 9.0 ? vec3(0.082,0.031,0.031) : vec3(0.039,0.039,0.082);\n' +
+      '  vec3 color = mix(bgIn, bgOut, min(1.0, bgD));\n' +
+      // Layer 0: am=1.0 fr=1.0 sp=0.8 ci=2 al=1.0
+      '  float sy; float depth; vec3 lc;\n' +
+      '  if (u_Layers >= 1) {\n' +
+      '    sy = waveSurface(localX, 1.0, 1.0, 0.8);\n' +
+      '    if (localY > sy) {\n' +
+      '      depth = clamp((localY - sy) / orbSize, 0.0, 1.0);\n' +
+      '      lc = mix(u_Pal[2], u_Pal[2], smoothstep(0.0, 0.6, depth));\n' +
+      '      lc = mix(lc, vec3(0.0), smoothstep(0.5, 1.0, depth));\n' +
+      '      color = lc;\n' +
+      '    }\n' +
+      '  }\n' +
+      // Layer 1: am=0.8 fr=1.5 sp=1.2 ci=0 al=0.7
+      '  if (u_Layers >= 2) {\n' +
+      '    sy = waveSurface(localX, 0.8, 1.5, 1.2);\n' +
+      '    if (localY > sy) {\n' +
+      '      depth = clamp((localY - sy) / orbSize, 0.0, 1.0);\n' +
+      '      lc = mix(u_Pal[0], u_Pal[2], smoothstep(0.0, 0.6, depth));\n' +
+      '      lc = mix(lc, vec3(0.0), smoothstep(0.5, 1.0, depth));\n' +
+      '      color = mix(color, lc, 0.7);\n' +
+      '    }\n' +
+      '  }\n' +
+      // Layer 2: am=0.6 fr=2.2 sp=1.5 ci=1 al=0.6
+      '  if (u_Layers >= 3) {\n' +
+      '    sy = waveSurface(localX, 0.6, 2.2, 1.5);\n' +
+      '    if (localY > sy) {\n' +
+      '      depth = clamp((localY - sy) / orbSize, 0.0, 1.0);\n' +
+      '      lc = mix(u_Pal[1], u_Pal[2], smoothstep(0.0, 0.6, depth));\n' +
+      '      lc = mix(lc, vec3(0.0), smoothstep(0.5, 1.0, depth));\n' +
+      '      color = mix(color, lc, 0.6);\n' +
+      '    }\n' +
+      '  }\n' +
+      // Layer 3: am=0.4 fr=3.0 sp=2.0 ci=3 al=0.4
+      '  if (u_Layers >= 4) {\n' +
+      '    sy = waveSurface(localX, 0.4, 3.0, 2.0);\n' +
+      '    if (localY > sy) {\n' +
+      '      depth = clamp((localY - sy) / orbSize, 0.0, 1.0);\n' +
+      '      lc = mix(u_Pal[3], u_Pal[2], smoothstep(0.0, 0.6, depth));\n' +
+      '      lc = mix(lc, vec3(0.0), smoothstep(0.5, 1.0, depth));\n' +
+      '      color = mix(color, lc, 0.4);\n' +
+      '    }\n' +
+      '  }\n' +
+      // Layer 4: am=0.3 fr=4.0 sp=2.5 ci=0 al=0.3
+      '  if (u_Layers >= 5) {\n' +
+      '    sy = waveSurface(localX, 0.3, 4.0, 2.5);\n' +
+      '    if (localY > sy) {\n' +
+      '      depth = clamp((localY - sy) / orbSize, 0.0, 1.0);\n' +
+      '      lc = mix(u_Pal[0], u_Pal[2], smoothstep(0.0, 0.6, depth));\n' +
+      '      lc = mix(lc, vec3(0.0), smoothstep(0.5, 1.0, depth));\n' +
+      '      color = mix(color, lc, 0.3);\n' +
+      '    }\n' +
+      '  }\n' +
+      // Surface glow
+      '  if (u_GlowEnabled > 0.5 && u_Val >= 5.0) {\n' +
+      '    float glI = (u_Val - 4.0) / 6.0;\n' +
+      '    sy = waveSurface(localX, 1.0, 1.0, 0.8);\n' +
+      '    float gD = abs(localY - sy) / (oR * 0.9);\n' +
+      '    float glow = exp(-gD * gD * 6.0) * (0.15 + glI * 0.4);\n' +
+      '    color += vec3(1.0, 0.863, 0.314) * glow;\n' +
+      '  }\n' +
+      // Edge anti-aliasing
+      '  float edge = 1.0 - smoothstep(0.97, 1.0, dist);\n' +
+      '  fragColor = vec4(color * edge, edge);\n' +
+      '}\n';
+
+    // ========= WEBGL2 INITIALIZATION =========
+    function glCompileShader(src, type) {
+      var s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(s));
+        return null;
+      }
+      return s;
+    }
+    function glCreateProgram(vs, fs) {
+      var v = glCompileShader(vs, gl.VERTEX_SHADER);
+      var f = glCompileShader(fs, gl.FRAGMENT_SHADER);
+      if (!v || !f) return null;
+      var p = gl.createProgram();
+      gl.attachShader(p, v); gl.attachShader(p, f);
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(p));
+        return null;
+      }
+      return p;
+    }
+    function glOrthoMatrix(w, h) {
+      return new Float32Array([
+        2/w, 0, 0, 0,
+        0, -2/h, 0, 0,
+        0, 0, -1, 0,
+        -1, 1, 0, 1
+      ]);
+    }
+    function glCreateQuad() {
+      var verts = new Float32Array([
+        -0.5,-0.5, 0.0,1.0,  0.5,-0.5, 1.0,1.0,
+         0.5, 0.5, 1.0,0.0, -0.5, 0.5, 0.0,0.0
+      ]);
+      var idx = new Uint16Array([0,1,2, 0,2,3]);
+      var vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      var vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+      var ibo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+      gl.bindVertexArray(null);
+      return {vao: vao, count: 6};
+    }
+
+    function initWebGL() {
+      if (!gl) {
+        gl = glCanvas.getContext('webgl2', {alpha: false, premultipliedAlpha: false});
+        if (!gl) return false;
+      }
+      if (!glQuad) glQuad = glCreateQuad();
+      if (!glProgLiquid) glProgLiquid = glCreateProgram(VS_LIQUID, FS_LIQUID);
+      return !!(glQuad && glProgLiquid);
+    }
+
+    function syncRendererCanvases() {
+      if (RENDERER === 'webgl2') {
+        glCanvas.style.display = 'block';
+        glCanvas.width = canvas.width;
+        glCanvas.height = canvas.height;
+      } else {
+        glCanvas.style.display = 'none';
+      }
+    }
+
+    // Render all orbs via WebGL2
+    function renderOrbsWebGL() {
+      if (!gl || !glProgLiquid) return;
+      if (glW !== canvas.width || glH !== canvas.height) {
+        glW = canvas.width; glH = canvas.height;
+        glCanvas.width = glW; glCanvas.height = glH;
+      }
+      gl.viewport(0, 0, glW, glH);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      gl.useProgram(glProgLiquid);
+      gl.bindVertexArray(glQuad.vao);
+
+      var proj = glOrthoMatrix(glW, glH);
+      gl.uniformMatrix4fv(gl.getUniformLocation(glProgLiquid, 'u_Proj'), false, proj);
+
+      var val = Math.max(1, Math.min(10, cfg.val));
+      var tp = tempParams(val);
+      var prgb = PALETTE_RGB[val];
+
+      // Palette uniform (4 colors x 3 floats = 12 floats)
+      var palData = new Float32Array(12);
+      for (var pi = 0; pi < 4; pi++) {
+        palData[pi*3]   = prgb[pi][0];
+        palData[pi*3+1] = prgb[pi][1];
+        palData[pi*3+2] = prgb[pi][2];
+      }
+      gl.uniform3fv(gl.getUniformLocation(glProgLiquid, 'u_Pal'), palData);
+
+      // Shared uniforms
+      gl.uniform1f(gl.getUniformLocation(glProgLiquid, 'u_Val'), val);
+      gl.uniform1i(gl.getUniformLocation(glProgLiquid, 'u_Layers'), cfg.layers);
+      gl.uniform1f(gl.getUniformLocation(glProgLiquid, 'u_Amp'), tp.amp);
+      gl.uniform1f(gl.getUniformLocation(glProgLiquid, 'u_Speed'), tp.speed);
+      gl.uniform1f(gl.getUniformLocation(glProgLiquid, 'u_GlowEnabled'), cfg.surfaceGlow ? 1.0 : 0.0);
+
+      var uPos = gl.getUniformLocation(glProgLiquid, 'u_Pos');
+      var uQuadSize = gl.getUniformLocation(glProgLiquid, 'u_QuadSize');
+      var uOrbRadius = gl.getUniformLocation(glProgLiquid, 'u_OrbRadius');
+      var uFill = gl.getUniformLocation(glProgLiquid, 'u_Fill');
+      var uTilt = gl.getUniformLocation(glProgLiquid, 'u_Tilt');
+      var uTime = gl.getUniformLocation(glProgLiquid, 'u_Time');
+      var uCols = gl.getUniformLocation(glProgLiquid, 'u_Cols');
+      var uWaveH = gl.getUniformLocation(glProgLiquid, 'u_WaveH');
+
+      for (var oi = 0; oi < orbs.length; oi++) {
+        var o = orbs[oi];
+        if (o.dead) continue;
+
+        var oR = orbRadius;
+        gl.uniform2f(uPos, o.x, o.y);
+        gl.uniform1f(uQuadSize, oR * 2.0);
+        gl.uniform1f(uOrbRadius, oR);
+        gl.uniform1f(uFill, o.fill);
+        gl.uniform1f(uTilt, o.tilt);
+        gl.uniform1f(uTime, o.time);
+        gl.uniform1i(uCols, cfg.cols);
+
+        // Upload wave heights (pad to 48 if needed)
+        var waveData = new Float32Array(48);
+        for (var wi = 0; wi < Math.min(cfg.cols, 48); wi++) {
+          waveData[wi] = o.wH[wi] || 0;
+        }
+        gl.uniform1fv(uWaveH, waveData);
+
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+      }
+
+      gl.bindVertexArray(null);
+    }
+
+    // WebGL2 toggle handler
+    var wglChk = document.getElementById('c-webgl2');
+    wglChk.onchange = function() {
+      if (this.checked) {
+        RENDERER = 'webgl2';
+        if (!initWebGL()) {
+          RENDERER = 'canvas2d';
+          this.checked = false;
+          console.warn('WebGL2 init failed');
+        }
+      } else {
+        RENDERER = 'canvas2d';
+      }
+      syncRendererCanvases();
     };
 
     // ========= FX PARTICLE ARRAYS =========
@@ -1102,6 +1430,12 @@
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // WebGL2: render orbs on glCanvas
+        if (RENDERER === 'webgl2') {
+          syncRendererCanvases();
+          renderOrbsWebGL();
+        }
+
         // Draw each orb
         var drawOrder = [];
         for (var oi2 = 0; oi2 < orbs.length; oi2++) {
@@ -1131,6 +1465,9 @@
           ctx.save();
           ctx.beginPath(); ctx.arc(0, 0, oR - .5, 0, Math.PI * 2); ctx.clip();
 
+          var baseY = -oR + oR * 2 * (1 - orb.fill);
+
+          if (RENDERER !== 'webgl2') {
           // Background
           var bg = ctx.createRadialGradient(-oR*.3, -oR*.3, 0, 0, 0, oR);
           bg.addColorStop(0, val >= 9 ? '#2a1510' : '#1a1a2e');
@@ -1138,7 +1475,6 @@
           ctx.fillStyle = bg; ctx.fillRect(-oR, -oR, oR*2, oR*2);
 
           // Liquid
-          var baseY = -oR + oR * 2 * (1 - orb.fill);
           var layerDefs = [
             {am:1,fr:1,sp:.8,ci:2,al:1},{am:.8,fr:1.5,sp:1.2,ci:0,al:.7},{am:.6,fr:2.2,sp:1.5,ci:1,al:.6},
             {am:.4,fr:3,sp:2,ci:3,al:.4},{am:.3,fr:4,sp:2.5,ci:0,al:.3}
@@ -1170,6 +1506,7 @@
             sg.addColorStop(1,'rgba(255,100,0,0)');
             ctx.fillStyle = sg; ctx.fillRect(-oR,baseY-10,orbSize,20);
           }
+          } // end Canvas2D-only orb rendering
 
           // Bubbles
           if (cfg.bubbles && tp.bubble > .1) {
