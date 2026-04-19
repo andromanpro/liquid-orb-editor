@@ -135,7 +135,16 @@
 
     // ========= BACKGROUND =========
     var BG_MODE = 'none';
-    document.getElementById('bg-select').onchange = function() { BG_MODE = this.value; };
+    var bgSelectEl = document.getElementById('bg-select');
+    var savedLiquidBg = localStorage.getItem('liquid-orb-bg');
+    if (savedLiquidBg && savedLiquidBg !== 'none') {
+      BG_MODE = savedLiquidBg;
+      bgSelectEl.value = savedLiquidBg;
+    }
+    bgSelectEl.onchange = function() {
+      BG_MODE = this.value;
+      localStorage.setItem('liquid-orb-bg', BG_MODE);
+    };
 
     // Pre-generate star positions for Space background (150 stars)
     var bgStars = [];
@@ -523,19 +532,21 @@
       'out vec4 fragColor;\n' +
       'void main() {\n' +
       '  vec2 uv = v_UV;\n' +
+      '  float aspect = u_Resolution.x / u_Resolution.y;\n' +
       '  // Deep blue-to-teal gradient\n' +
       '  vec3 topCol = vec3(0.04, 0.086, 0.157);\n' +
       '  vec3 midCol = vec3(0.047, 0.165, 0.29);\n' +
       '  vec3 botCol = vec3(0.04, 0.29, 0.35);\n' +
       '  vec3 col = mix(topCol, midCol, smoothstep(0.0, 0.5, uv.y));\n' +
       '  col = mix(col, botCol, smoothstep(0.4, 1.0, uv.y));\n' +
-      '  // Caustic patterns\n' +
+      '  // Caustic patterns — pixel-space frequency\n' +
+      '  vec2 cp = gl_FragCoord.xy / 80.0;\n' +
       '  float caustic = 0.0;\n' +
       '  for (int i = 0; i < 6; i++) {\n' +
       '    float fi = float(i);\n' +
-      '    float freq = 5.0 + fi * 3.0;\n' +
+      '    float freq = 2.0 + fi * 1.5;\n' +
       '    float ph = fi * 1.3;\n' +
-      '    caustic += sin(uv.x * freq + u_Time * 0.5 + ph) * sin(uv.y * freq * 0.7 + u_Time * 0.3 + ph * 2.0);\n' +
+      '    caustic += sin(cp.x * freq + u_Time * 0.5 + ph) * sin(cp.y * freq * 0.7 + u_Time * 0.3 + ph * 2.0);\n' +
       '  }\n' +
       '  caustic = caustic / 6.0 * 0.5 + 0.5;\n' +
       '  col += vec3(0.1, 0.2, 0.25) * caustic * 0.08;\n' +
@@ -554,7 +565,7 @@
       '    float bx = fract(sin(fb * 43.758) * 0.5 + 0.5 + sin(u_Time * 0.5 + fb * 2.3) * 0.015);\n' +
       '    float by = 1.0 - fract(fract(sin(fb * 17.34) * 0.5 + 0.5) + u_Time * (0.01 + fract(sin(fb * 7.89)) * 0.015));\n' +
       '    float bs = (1.0 + fract(sin(fb * 91.12)) * 3.0) / u_Resolution.y * 2.0;\n' +
-      '    float bd = length(uv - vec2(bx, by));\n' +
+      '    float bd = length((uv - vec2(bx, by)) * vec2(aspect, 1.0));\n' +
       '    float bubble = smoothstep(bs, bs * 0.3, bd) * 0.2;\n' +
       '    col += vec3(0.6, 0.86, 1.0) * bubble;\n' +
       '  }\n' +
@@ -572,10 +583,11 @@
       'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n' +
       'void main() {\n' +
       '  vec2 uv = v_UV;\n' +
-      '  // Dark gradient\n' +
-      '  float d = length(uv - 0.5);\n' +
+      '  float aspect = u_Resolution.x / u_Resolution.y;\n' +
+      '  // Dark gradient — aspect-corrected\n' +
+      '  float d = length((uv - 0.5) * vec2(aspect, 1.0));\n' +
       '  vec3 col = mix(vec3(0.04, 0.04, 0.1), vec3(0.01, 0.01, 0.03), smoothstep(0.0, 0.7, d));\n' +
-      '  // Stars with twinkling\n' +
+      '  // Stars with twinkling — aspect-corrected distances\n' +
       '  for (int i = 0; i < 150; i++) {\n' +
       '    vec2 sp = u_Stars[i];\n' +
       '    float sd = u_StarData[i];\n' +
@@ -583,11 +595,11 @@
       '    float speed = 0.5 + fract(sd * 7.13) * 2.0;\n' +
       '    float sz = (0.5 + fract(sd * 3.17) * 2.0) / u_Resolution.y * 2.0;\n' +
       '    float twinkle = 0.4 + 0.6 * (0.5 + 0.5 * sin(u_Time * speed + phase));\n' +
-      '    float dist = length(uv - sp);\n' +
+      '    float dist = length((uv - sp) * vec2(aspect, 1.0));\n' +
       '    float star = smoothstep(sz, 0.0, dist) * twinkle;\n' +
       '    col += vec3(1.0) * star;\n' +
       '  }\n' +
-      '  // Nebula clouds\n' +
+      '  // Nebula clouds — aspect-corrected\n' +
       '  vec3 nebColors[3];\n' +
       '  nebColors[0] = vec3(0.31, 0.16, 0.47);\n' +
       '  nebColors[1] = vec3(0.16, 0.24, 0.55);\n' +
@@ -598,7 +610,7 @@
       '    nc.x += sin(u_Time * 0.1 + fn * 2.5) * 0.08;\n' +
       '    nc.y += cos(u_Time * 0.08 + fn * 1.7) * 0.06;\n' +
       '    float nr = 0.15 + 0.05 * sin(u_Time * 0.15 + fn);\n' +
-      '    float nd = length(uv - nc) / nr;\n' +
+      '    float nd = length((uv - nc) * vec2(aspect, 1.0)) / nr;\n' +
       '    float nebula = exp(-nd * nd * 2.0);\n' +
       '    float alpha = 0.08 + 0.03 * sin(u_Time * 0.2 + fn * 3.0);\n' +
       '    col += nebColors[n] * nebula * alpha;\n' +
@@ -627,8 +639,9 @@
       '}\n' +
       'void main() {\n' +
       '  vec2 uv = v_UV;\n' +
+      '  float aspect = u_Resolution.x / u_Resolution.y;\n' +
       '  vec3 col = vec3(0.04);\n' +
-      '  // 4 animated blobs\n' +
+      '  // 4 animated blobs — aspect-corrected\n' +
       '  float blobCx[4]; float blobCy[4]; float blobR[4]; float blobHue[4];\n' +
       '  float blobSx[4]; float blobSy[4];\n' +
       '  blobCx[0]=0.3; blobCy[0]=0.4; blobR[0]=0.25; blobHue[0]=0.0; blobSx[0]=0.7; blobSy[0]=0.5;\n' +
@@ -642,7 +655,7 @@
       '    bc.y = blobCy[i] + cos(u_Time * 0.12 * blobSy[i] + fi * 2.1) * 0.2;\n' +
       '    float br = blobR[i] * (0.8 + 0.2 * sin(u_Time * 0.1 + fi));\n' +
       '    float hue = mod(blobHue[i] + u_Time * 8.0, 360.0);\n' +
-      '    float bd = length(uv - bc) / br;\n' +
+      '    float bd = length((uv - bc) * vec2(aspect, 1.0)) / br;\n' +
       '    float blob = exp(-bd * bd * 1.5);\n' +
       '    float alpha = 0.12 + 0.04 * sin(u_Time * 0.3 + fi * 1.7);\n' +
       '    vec3 blobCol = hsl2rgb(hue, 0.7, 0.5) * blob * alpha;\n' +
@@ -1077,10 +1090,11 @@
       var prevX = orb.x;
       orb.x = evt.clientX - orb.dragOff.x; orb.y = evt.clientY - orb.dragOff.y;
       var deltaX = orb.x - prevX;
-      orb.tiltV += deltaX * .1 * cfg.sloshing;
+      var clampedDeltaX = Math.max(-30, Math.min(30, deltaX));  // cap drag impulse
+      orb.tiltV += clampedDeltaX * .1 * cfg.sloshing;
       var cols = orb.wH.length;
       for (var ci = 0; ci < cols; ci++) {
-        orb.wV[ci] -= deltaX * (ci/(cols-1)-.5) * .04 * cfg.sloshing;
+        orb.wV[ci] -= clampedDeltaX * (ci/(cols-1)-.5) * .04 * cfg.sloshing;
       }
       orb.hist.push({x:evt.clientX, y:evt.clientY, t:Date.now()});
       if (orb.hist.length > 6) orb.hist.shift();
@@ -1683,10 +1697,20 @@
           }
           if (!inMerge && !orb.dragging && !orb.flying) { orb.vx *= .92; orb.vy *= .92; }
 
-          // Tilt
+          // Tilt — soft-clamp + adaptive damping
           orb.tilt += orb.tiltV * deltaTime;
-          orb.tiltV *= Math.pow(.92, deltaTime);
+          var tiltDamp = .92;
+          var absTilt = Math.abs(orb.tilt);
+          if (absTilt > 2.0) {
+            // Progressive damping: the further past 2.0, the stronger the brake
+            var excess = (absTilt - 2.0) / 3.0;  // 0..1 over range 2..5
+            tiltDamp = .92 - Math.min(0.3, excess * 0.3);  // 0.92 → 0.62
+          }
+          orb.tiltV *= Math.pow(tiltDamp, deltaTime);
           orb.tiltV -= orb.tilt * .06 * deltaTime;
+          // Hard cap as safety net (soft-clamp keeps it well under this)
+          if (orb.tilt > 5.0) { orb.tilt = 5.0; orb.tiltV *= .3; }
+          if (orb.tilt < -5.0) { orb.tilt = -5.0; orb.tiltV *= .3; }
 
           // Resize wave arrays if cols changed
           if (orb.wH.length !== cfg.cols) {
@@ -1699,13 +1723,22 @@
           var sf = Math.min(1, 24 / cols);
           var sdt = deltaTime * sf;
           var maxAmp = orbSize * .4;
+          var softLimit = maxAmp * .6;  // start damping at 60% of max
           for (var step = 0; step < cfg.substeps; step++) {
             for (var wi = 0; wi < cols; wi++) {
               orb.wV[wi] += -cfg.spring * orb.wH[wi] * sdt;
-              orb.wV[wi] *= Math.pow(cfg.damping, sdt);
+              // Adaptive damping: stronger when amplitude exceeds soft limit
+              var absH = Math.abs(orb.wH[wi]);
+              var waveDamp = cfg.damping;
+              if (absH > softLimit) {
+                var overRatio = (absH - softLimit) / (maxAmp - softLimit);
+                waveDamp = cfg.damping - Math.min(0.15, overRatio * 0.15);
+              }
+              orb.wV[wi] *= Math.pow(waveDamp, sdt);
               orb.wH[wi] += orb.wV[wi] * sdt * .25;
-              if (orb.wH[wi] > maxAmp) { orb.wH[wi] = maxAmp; orb.wV[wi] *= .5; }
-              if (orb.wH[wi] < -maxAmp) { orb.wH[wi] = -maxAmp; orb.wV[wi] *= .5; }
+              // Safety hard cap (soft-clamp keeps amplitude well below this)
+              if (orb.wH[wi] > maxAmp) { orb.wH[wi] = maxAmp; orb.wV[wi] *= .3; }
+              if (orb.wH[wi] < -maxAmp) { orb.wH[wi] = -maxAmp; orb.wV[wi] *= .3; }
             }
             for (var wi2 = 0; wi2 < cols; wi2++) {
               if (wi2 > 0) { var d1 = (orb.wH[wi2]-orb.wH[wi2-1])*cfg.spread*sdt; orb.wV[wi2]-=d1; orb.wV[wi2-1]+=d1; }
