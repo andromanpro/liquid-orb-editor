@@ -101,3 +101,7 @@ python -m http.server 8878
 ```
 
 Open in browser, drag orbs, tweak sliders in the right panel, export JSON presets.
+
+---
+
+🌐 [androman.pro](https://androman.pro) · ✈ [Telegram](https://t.me/andromanpro1c)
